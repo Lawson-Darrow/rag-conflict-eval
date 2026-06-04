@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "rag-conflict-eval: conflict-aware behavior evaluation for RAG"
+authors:
+  - family-names: "Darrow"
+    given-names: "Lawson"
+repository-code: "https://github.com/Lawson-Darrow/rag-conflict-eval"
+license: MIT
+version: "0.2.0"
+date-released: "2026-06-04"
+keywords:
+  - retrieval-augmented-generation
+  - rag
+  - llm-evaluation
+  - knowledge-conflict
+references:
+  - type: article
+    title: "(D)RAGged into Conflicts: Detecting and Addressing Conflicting Sources in Search-Augmented LLMs"
+    authors:
+      - family-names: "Cattan"
+        given-names: "Arie"
+    url: "https://arxiv.org/abs/2506.08500"
+    year: 2025

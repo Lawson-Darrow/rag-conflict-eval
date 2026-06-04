@@ -6,11 +6,16 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-04
+
 ### Added
-- **Conflict detection** for `auto` mode (runs on your own traces, no gold labels):
-  a coarse detector (`no_material_issue` / `source_divergence` / `temporal_supersession`)
-  built around the false-consensus wedge, plus the fine 5-way detector for oracle mode.
-- `bench-coarse` / `bench-detector` CLI commands with stratified `--sample`/`--seed`.
+- **Auto mode** (`rag-conflict-eval auto`) — run on your own `{question, contexts,
+  answer}` traces (no gold labels) to find likely false consensus. A coarse detector
+  routes to a narrow false-consensus/stale-source judge; evidence-rich output
+  (verdict, risky answer span, per-source claims). A diagnostic, not a validated gate.
+- **Conflict detection**: a coarse detector (`no_material_issue` / `source_divergence`
+  / `temporal_supersession`) for auto mode, plus the fine 5-way detector for oracle
+  mode. `bench-coarse` / `bench-detector` CLI commands with stratified `--sample`/`--seed`.
 - Benchmark on the full CONFLICTS dataset (458): false-consensus detection
   **F1 0.81 / recall 0.89 / precision 0.75** (gpt-4o-mini); 3-way macro-F1 0.52.
 
@@ -22,7 +27,7 @@ All notable changes to this project are documented here. Format loosely follows
 - Confidence-based abstention is not yet calibrated (model self-reports high
   confidence); logprob-based abstention is the next experiment.
 - `temporal_supersession` detection is weak (~0.23 recall); detector over-flags
-  clean cases (precision 0.75).
+  clean cases (precision 0.75). The behavior rater remains unvalidated.
 
 ## [0.1.0] - 2026-06-04
 

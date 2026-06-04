@@ -1,5 +1,9 @@
 # rag-conflict-eval
 
+[![CI](https://github.com/Lawson-Darrow/rag-conflict-eval/actions/workflows/ci.yml/badge.svg)](https://github.com/Lawson-Darrow/rag-conflict-eval/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+
 **Catch RAG answers that mishandle conflicting retrieved evidence — when your system invents a consensus that isn't there, or trusts a stale source over a current one.**
 
 > ⚠️ Pre-alpha. Interfaces and prompts will change. The behavior rater is a
@@ -28,6 +32,37 @@ Two things, kept separate:
    own RAG traces, no gold labels needed.
 2. **Score behavior** — given the conflict, did the answer behave correctly? (Don't
    manufacture consensus; reflect genuine disagreement; prefer current over stale.)
+
+## See it catch a bug
+
+Point it at your own RAG traces (`{question, contexts, answer}`):
+
+```bash
+rag-conflict-eval auto traces.jsonl
+```
+
+Given a trace where two sources disagree (a preliminary $4.1B figure vs. an audited
+$3.8B that supersedes it) and the answer just reports the stale one:
+
+```
+scanned 3 traces - 2 need review
+  ok=1 false_consensus_risk=1 stale_source_risk=1 unclear=0
+
+[stale_source_risk] trace revenue  (conflict: temporal_supersession)
+    why: The answer relied on an outdated preliminary report instead of the newer
+         audited 10-Q filing that supersedes it.
+    answer span: "Acme's Q3 revenue was $4.1B."
+    source claims: [{"source": 1, "answer_value": "4.1B", "source_date": "Oct"},
+                    {"source": 2, "answer_value": "3.8B", "source_date": "Dec, supersedes"}]
+
+[false_consensus_risk] trace coffee  (conflict: source_divergence)
+    why: The answer states coffee is good for health without acknowledging the
+         conflicting evidence in the sources.
+    answer span: "Yes, coffee is good for your health."
+```
+
+It's a **diagnostic / linter** (recall-heavy — it flags and lets you triage with the
+evidence), not an autonomous pass/fail gate.
 
 ## Does it work?
 
