@@ -10,11 +10,11 @@ reply triggers ONE repair retry; if it still fails the result is ``PARSE_ERROR``
 from __future__ import annotations
 
 import json
+import re
 from typing import Callable, Iterable, Optional
 
 from .prompts.templates import (
     PROMPT_VERSION,
-    VERDICT_SCHEMA,
     build_judge_prompt,
     build_repair_message,
 )
@@ -46,21 +46,30 @@ def _strip_fences(text: str) -> str:
 
 
 def parse_verdict(text: str) -> tuple[Optional[AdherenceLabel], Optional[str]]:
-    """Parse a judge reply into (label, rationale). Returns (None, None) if the
-    reply is not valid JSON with a known verdict."""
+    """Parse a judge reply into (label, rationale). Lenient by design: extra
+    fields are ignored and a non-string rationale is dropped (a valid verdict
+    should not be discarded over cosmetics). Returns (None, None) only when no
+    known verdict can be recovered. Tries the fence-stripped text first, then
+    the first ``{...}`` block embedded in surrounding prose."""
     if not text:
         return None, None
-    try:
-        obj = json.loads(_strip_fences(text))
-    except (json.JSONDecodeError, ValueError):
-        return None, None
-    if not isinstance(obj, dict):
-        return None, None
-    label = _VERDICT_TO_LABEL.get(obj.get("verdict"))
-    if label is None:
-        return None, None
-    rationale = obj.get("rationale")
-    return label, (rationale if isinstance(rationale, str) else None)
+    candidates = [_strip_fences(text)]
+    m = re.search(r"\{.*\}", text, re.DOTALL)
+    if m:
+        candidates.append(m.group(0))
+    for candidate in candidates:
+        try:
+            obj = json.loads(candidate)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(obj, dict):
+            continue
+        label = _VERDICT_TO_LABEL.get(obj.get("verdict"))
+        if label is None:
+            continue
+        rationale = obj.get("rationale")
+        return label, (rationale if isinstance(rationale, str) else None)
+    return None, None
 
 
 class BehaviorAdherenceScorer:
@@ -130,7 +139,8 @@ class BehaviorAdherenceScorer:
                     instance,
                     status=ResultStatus.PARSE_ERROR,
                     error="judge did not return a valid verdict after repair retry",
-                    raw_judge_output=raw2,
+                    # Preserve BOTH attempts for audit/debugging.
+                    raw_judge_output=f"[attempt 1]\n{raw}\n\n[attempt 2 / repair]\n{raw2}",
                 )
             raw = raw2
 

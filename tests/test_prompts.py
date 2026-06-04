@@ -46,3 +46,22 @@ def test_few_shot_present_for_every_type():
     for t in ConflictType:
         assert FEW_SHOT.get(t), f"missing few-shot for {t}"
         assert t in TYPE_DISPLAY
+
+
+def test_every_type_has_uncertain_few_shot():
+    # Guards against biasing the judge away from abstention.
+    for t, examples in FEW_SHOT.items():
+        verdicts = {v for _, v, _ in examples}
+        assert "uncertain" in verdicts, f"{t} has no uncertain example"
+
+
+def test_prompt_has_injection_delimiters_and_security_note():
+    msgs = build_judge_prompt(_inst(), "ans")
+    system, user = msgs[0]["content"], msgs[1]["content"]
+    assert "<SOURCES>" in user and "<CANDIDATE_ANSWER>" in user
+    assert "untrusted" in system.lower()
+
+
+def test_experimental_type_gets_note():
+    user = build_judge_prompt(_inst(ConflictType.MISINFORMATION), "a")[1]["content"]
+    assert "experimental" in user.lower()

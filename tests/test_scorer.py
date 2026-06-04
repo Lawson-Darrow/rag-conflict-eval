@@ -48,6 +48,17 @@ def test_parse_garbage_returns_none():
     assert parse_verdict("") == (None, None)
 
 
+def test_parse_lenient_extra_fields_and_bad_rationale():
+    label, why = parse_verdict('{"verdict": "adhere", "rationale": 123, "extra": "x"}')
+    assert label is AdherenceLabel.ADHERE
+    assert why is None  # non-string rationale dropped, verdict kept
+
+
+def test_parse_json_embedded_in_prose():
+    label, _ = parse_verdict('Sure! {"verdict": "adhere"} hope that helps.')
+    assert label is AdherenceLabel.ADHERE
+
+
 # --- scorer happy path + metadata ---
 
 def test_score_ok_records_metadata():
@@ -78,12 +89,13 @@ def test_repair_retry_recovers():
     assert r.label is AdherenceLabel.NOT_ADHERE
 
 
-def test_parse_error_after_failed_repair():
+def test_parse_error_preserves_both_attempts():
     s = _scorer(["garbage", "still garbage"])
     r = s.score(_inst(), "x")
     assert r.status is ResultStatus.PARSE_ERROR
     assert r.label is None
-    assert r.raw_judge_output == "still garbage"
+    assert "garbage" in r.raw_judge_output and "still garbage" in r.raw_judge_output
+    assert "attempt 1" in r.raw_judge_output and "attempt 2" in r.raw_judge_output
 
 
 # --- transport error ---

@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
-from .taxonomy import ConflictType
+from .taxonomy import ConflictType, spec_for
 from .types import AdherenceResult, ResultStatus
 
 
@@ -50,6 +50,8 @@ class TypeReport:
 @dataclass
 class AdherenceReport:
     per_type: dict[ConflictType, TypeReport] = field(default_factory=dict)
+    #: OVERALL counts (below) exclude these types; ``per_type`` still includes them.
+    experimental_excluded: list[ConflictType] = field(default_factory=list)
     n_total: int = 0
     n_scored: int = 0
     n_adhered: int = 0
@@ -71,32 +73,39 @@ class AdherenceReport:
         return (self.n_parse_error + self.n_judge_error) / self.n_total if self.n_total else None
 
 
-def aggregate(results: Iterable[AdherenceResult]) -> AdherenceReport:
-    """Roll per-item results into an overall + per-type :class:`AdherenceReport`."""
+def _bump(target, r: AdherenceResult) -> None:
+    """Increment the count fields shared by TypeReport and AdherenceReport."""
+    target.n_total += 1
+    if r.status is ResultStatus.PARSE_ERROR:
+        target.n_parse_error += 1
+    elif r.status is ResultStatus.JUDGE_ERROR:
+        target.n_judge_error += 1
+    elif r.scored:
+        target.n_scored += 1
+        if r.score == 1:
+            target.n_adhered += 1
+    else:  # status OK, UNCERTAIN abstention
+        target.n_uncertain += 1
+
+
+def aggregate(
+    results: Iterable[AdherenceResult], *, exclude_experimental: bool = True
+) -> AdherenceReport:
+    """Roll per-item results into an overall + per-type :class:`AdherenceReport`.
+
+    ``per_type`` always covers every type seen. The OVERALL counts exclude
+    experimental types (e.g. Misinformation, n=5) by default, so the headline
+    ``adherence_rate`` is not polluted by a type we can't yet evaluate. Set
+    ``exclude_experimental=False`` to fold them into the overall too.
+    """
     report = AdherenceReport()
+    excluded: set[ConflictType] = set()
     for r in results:
         tr = report.per_type.setdefault(r.conflict_type, TypeReport(conflict_type=r.conflict_type))
-        report.n_total += 1
-        tr.n_total += 1
-
-        if r.status is ResultStatus.PARSE_ERROR:
-            report.n_parse_error += 1
-            tr.n_parse_error += 1
+        _bump(tr, r)
+        if exclude_experimental and spec_for(r.conflict_type).experimental:
+            excluded.add(r.conflict_type)
             continue
-        if r.status is ResultStatus.JUDGE_ERROR:
-            report.n_judge_error += 1
-            tr.n_judge_error += 1
-            continue
-
-        # status OK: either a 0/1 score or an UNCERTAIN abstention
-        if r.scored:
-            report.n_scored += 1
-            tr.n_scored += 1
-            if r.score == 1:
-                report.n_adhered += 1
-                tr.n_adhered += 1
-        else:
-            report.n_uncertain += 1
-            tr.n_uncertain += 1
-
+        _bump(report, r)
+    report.experimental_excluded = sorted(excluded, key=lambda c: c.value)
     return report

@@ -47,6 +47,22 @@ def test_per_type_breakdown():
     assert rep.per_type[ConflictType.NO_CONFLICT].adherence_rate == 0.0
 
 
+def test_experimental_excluded_from_overall_but_kept_per_type():
+    results = [
+        _r(AdherenceLabel.ADHERE, ctype=ConflictType.FRESHNESS),
+        _r(AdherenceLabel.NOT_ADHERE, ctype=ConflictType.MISINFORMATION),  # experimental
+    ]
+    rep = aggregate(results)  # exclude_experimental=True by default
+    assert rep.n_total == 1                      # misinformation excluded from overall
+    assert rep.adherence_rate == 1.0             # only freshness counts
+    assert ConflictType.MISINFORMATION in rep.experimental_excluded
+    assert rep.per_type[ConflictType.MISINFORMATION].n_total == 1  # still reported per-type
+
+    rep2 = aggregate(results, exclude_experimental=False)
+    assert rep2.n_total == 2
+    assert rep2.adherence_rate == 0.5
+
+
 def test_score_property():
     assert _r(AdherenceLabel.ADHERE).score == 1
     assert _r(AdherenceLabel.NOT_ADHERE).score == 0
