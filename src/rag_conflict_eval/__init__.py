@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .aggregate import AdherenceReport, TypeReport, aggregate
+from .auto import AutoPipeline, AutoResult, AutoVerdict, Trace, load_traces
 from .coarse import (
     CoarseConflict,
     CoarseConflictDetector,
@@ -70,5 +71,11 @@ __all__ = [
     "FINE_TO_COARSE",
     "benchmark_coarse_detector",
     "resolve",
+    # auto mode (run on your own RAG traces)
+    "AutoPipeline",
+    "AutoResult",
+    "AutoVerdict",
+    "Trace",
+    "load_traces",
     "__version__",
 ]

@@ -19,6 +19,7 @@ import sys
 from collections import Counter
 
 from .aggregate import AdherenceReport, aggregate
+from .auto import AutoPipeline, AutoResult, AutoVerdict, load_traces
 from .coarse import CoarseConflict, CoarseConflictDetector, benchmark_coarse_detector
 from .detector import ABSTAIN, ERROR, ConflictTypeDetector, DetectorReport, benchmark_detector
 from .taxonomy import ConflictType
@@ -169,6 +170,53 @@ def _cmd_bench_detector(args: argparse.Namespace) -> int:
     return 0
 
 
+def _auto_result_to_dict(r: AutoResult) -> dict:
+    return {
+        "trace_id": r.trace_id,
+        "verdict": r.verdict.value,
+        "needs_review": r.needs_review,
+        "conflict": r.conflict.value if r.conflict else None,
+        "rationale": r.rationale,
+        "risky_answer_span": r.risky_answer_span,
+        "detector_status": r.detector_status.value,
+        "behavior_status": r.behavior_status.value if r.behavior_status else None,
+        "evidence": r.evidence,
+    }
+
+
+def format_auto_results(results: list[AutoResult]) -> str:
+    counts = Counter(r.verdict.value for r in results)
+    flagged = [r for r in results if r.needs_review]
+    lines = [
+        f"scanned {len(results)} traces - {len(flagged)} need review",
+        "  " + " ".join(f"{v}={counts.get(v, 0)}" for v in (x.value for x in AutoVerdict)),
+        "",
+    ]
+    for r in flagged:
+        lines.append(f"[{r.verdict.value}] trace {r.trace_id}  (conflict: {r.conflict.value if r.conflict else 'n/a'})")
+        if r.rationale:
+            lines.append(f"    why: {r.rationale}")
+        if r.risky_answer_span:
+            lines.append(f"    answer span: \"{r.risky_answer_span}\"")
+        claims = (r.evidence or {}).get("claims")
+        if claims:
+            lines.append(f"    source claims: {json.dumps(claims)[:300]}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def _cmd_auto(args: argparse.Namespace) -> int:
+    traces = load_traces(args.traces)
+    pipe = AutoPipeline(model=args.model, judged_text_field=args.judged_text_field)
+    results = pipe.run_batch(traces)
+    print(format_auto_results(results))
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as f:
+            for r in results:
+                f.write(json.dumps(_auto_result_to_dict(r)) + "\n")
+    return 0
+
+
 def _cmd_stats(args: argparse.Namespace) -> int:
     instances = load_conflicts(args.data)
     counts = Counter(i.conflict_type.value for i in instances)
@@ -263,6 +311,16 @@ def build_parser() -> argparse.ArgumentParser:
     pcz.add_argument("--thresholds", default="0.6,0.7,0.8", help="comma-separated confidence cutoffs")
     pcz.add_argument("--out", help="write raw per-instance predictions JSONL here")
     pcz.set_defaults(func=_cmd_bench_coarse)
+
+    pa = sub.add_parser("auto", help="find likely false consensus in your own RAG traces")
+    pa.add_argument("traces", help="JSONL of traces: {question, contexts, answer, trace_id?}")
+    pa.add_argument("--model", default="gpt-4o-mini", help="litellm model")
+    pa.add_argument(
+        "--judged-text-field", default="short_text",
+        choices=["snippet", "short_text", "response_str"],
+    )
+    pa.add_argument("--out", help="write full per-trace results JSONL here")
+    pa.set_defaults(func=_cmd_auto)
     return p
 
 
