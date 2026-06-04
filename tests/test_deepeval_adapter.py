@@ -175,3 +175,32 @@ def test_with_real_deepeval_test_case():
     m = BehaviorAdherenceMetric(judge_fn=lambda _: '{"verdict": "adhere"}')
     assert m.measure(tc) == 1.0
     assert m.is_successful() is True
+
+
+def test_real_deepeval_multi_case_aggregate():
+    """Realistic loop: many real LLMTestCases -> measured metrics -> honest
+    aggregate via aggregate_metrics (not DeepEval's failure-counting pass-rate)."""
+    pytest.importorskip("deepeval")
+    from deepeval.test_case import LLMTestCase
+
+    cases = [
+        ("freshness", '{"verdict": "adhere"}'),
+        ("no_conflict", '{"verdict": "not_adhere"}'),
+        ("conflicting_opinions", '{"verdict": "uncertain"}'),
+        ("misinformation", '{"verdict": "adhere"}'),  # experimental -> excluded
+    ]
+    metrics = []
+    for ct, resp in cases:
+        tc = LLMTestCase(input="q", actual_output="a", retrieval_context=["s"],
+                         metadata={"conflict_type": ct})
+        m = BehaviorAdherenceMetric(judge_fn=lambda _, r=resp: r)
+        m.measure(tc)
+        metrics.append(m)
+
+    rep = aggregate_metrics(metrics)
+    assert rep.n_total == 3                       # misinformation excluded
+    assert rep.n_scored == 2                      # uncertain not scored
+    assert rep.n_adhered == 1                     # freshness adhere
+    assert rep.adherence_rate == 0.5
+    assert rep.n_uncertain == 1
+    assert ConflictType.MISINFORMATION in rep.experimental_excluded

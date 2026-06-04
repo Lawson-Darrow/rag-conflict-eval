@@ -72,6 +72,11 @@ def _parse_record(rec: dict, *, line_no: int) -> ConflictInstance:
     )
 
 
+def record_to_instance(rec: dict) -> ConflictInstance:
+    """Build one :class:`ConflictInstance` from a raw CONFLICTS-style record."""
+    return _parse_record(rec, line_no=0)
+
+
 def load_conflicts(path: str | Path) -> list[ConflictInstance]:
     """Load ``conflicts.jsonl`` into a list of :class:`ConflictInstance`.
 

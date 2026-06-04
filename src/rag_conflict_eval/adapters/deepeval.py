@@ -70,9 +70,9 @@ def instance_from_test_case(test_case) -> ConflictInstance:
     """Reconstruct a :class:`ConflictInstance` from a DeepEval ``LLMTestCase``.
 
     Single source of reconstruction truth (not duplicated in the metric). Gold
-    ``conflict_type`` is required in ``additional_metadata``. Sources come from
-    structured ``additional_metadata['search_results']`` when present, else from
-    DeepEval's ``retrieval_context`` strings.
+    ``conflict_type`` is required in ``metadata`` (``additional_metadata`` on
+    older DeepEval). Sources come from structured ``metadata['search_results']``
+    when present, else from DeepEval's ``retrieval_context``.
     """
     # DeepEval 4.x renamed `additional_metadata` -> `metadata`; support both.
     md = getattr(test_case, "metadata", None)
