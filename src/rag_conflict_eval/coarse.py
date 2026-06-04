@@ -209,17 +209,23 @@ _VALID_LETTERS = set(_LETTER_TO_COARSE) | {"U"}
 
 
 def _letter_distribution(top_logprobs) -> dict:
-    """OpenAI/litellm first-token ``top_logprobs`` -> ``{LETTER: probability}``."""
+    """OpenAI/litellm first-token ``top_logprobs`` -> ``{LETTER: probability}``.
+
+    Only EXACT single-letter tokens count (after stripping whitespace) — so prose
+    alternatives like "Different"/"No"/"Temporal" are NOT mistaken for labels. Token
+    variants of the same letter (e.g. ``"D"``, ``" D"``, ``"\\nD"``) are disjoint
+    first-token events, so their probabilities are SUMMED.
+    """
     dist: dict[str, float] = {}
     for item in top_logprobs or []:
         tok = item.get("token") if isinstance(item, dict) else getattr(item, "token", None)
         if not tok:
             continue
-        letter = tok.strip().upper()[:1]
-        if letter in _VALID_LETTERS:
+        letter = tok.strip().upper()
+        if letter in _VALID_LETTERS:  # exact letter only, not a prefix
             lp = item.get("logprob") if isinstance(item, dict) else getattr(item, "logprob", None)
             if lp is not None:
-                dist[letter] = max(dist.get(letter, 0.0), math.exp(lp))
+                dist[letter] = dist.get(letter, 0.0) + math.exp(lp)  # sum disjoint variants
     return dist
 
 
@@ -278,12 +284,17 @@ class CalibratedCoarseDetector:
                 instance, status=ResultStatus.PARSE_ERROR,
                 error="no valid letter (N/D/T/U) found in logprobs",
             )
-        total = sum(dist.values()) or 1.0
+        valid_mass = sum(dist.values())   # prob mass on real letters (within top-k)
+        total = valid_mass or 1.0
         norm = {k: v / total for k, v in dist.items()}
         best = max(norm, key=norm.get)
-        conf = norm[best]
+        conf = norm[best]   # P(label | the model answered with a letter)
         ordered = sorted(norm.values(), reverse=True)
-        signals = {"distribution": norm, "margin": conf - (ordered[1] if len(ordered) > 1 else 0.0)}
+        signals = {
+            "distribution": norm,
+            "margin": conf - (ordered[1] if len(ordered) > 1 else 0.0),
+            "valid_letter_mass": valid_mass,   # low -> model didn't really answer a letter
+        }
         if best == "U":
             return self._result(
                 instance, status=ResultStatus.OK, said_uncertain=True,

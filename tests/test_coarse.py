@@ -78,7 +78,7 @@ def test_detect_parse_error_then_judge_error():
 
 # --- resolve (threshold gating) ---
 
-def test_letter_distribution_parses_objects_and_dicts():
+def test_letter_distribution_exact_letters_and_sums_variants():
     import math
 
     class _Tok:
@@ -86,10 +86,22 @@ def test_letter_distribution_parses_objects_and_dicts():
             self.token = token
             self.logprob = logprob
 
-    d = _letter_distribution([_Tok("D", math.log(0.6)), _Tok("N", math.log(0.3)), _Tok(" x", math.log(0.1))])
-    assert round(d["D"], 3) == 0.6 and round(d["N"], 3) == 0.3 and "X" not in d
+    d = _letter_distribution([
+        _Tok("D", math.log(0.4)),
+        _Tok(" D", math.log(0.2)),          # whitespace variant of D -> summed
+        _Tok("Different", math.log(0.3)),   # prose, NOT a label -> excluded
+        _Tok("N", math.log(0.1)),
+    ])
+    assert round(d["D"], 3) == 0.6          # 0.4 + 0.2 (disjoint events summed)
+    assert round(d["N"], 3) == 0.1
+    assert "DIFFERENT" not in d and len(d) == 2
     d2 = _letter_distribution([{"token": "U", "logprob": math.log(0.5)}])
     assert round(d2["U"], 3) == 0.5
+
+
+def test_calibrated_exposes_valid_mass():
+    r = _calib({"D": 0.6, "N": 0.2}).detect(_inst())
+    assert round(r.signals["valid_letter_mass"], 3) == 0.8
 
 
 def _calib(dist):
