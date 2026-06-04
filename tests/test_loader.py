@@ -2,8 +2,10 @@ import json
 
 import pytest
 
+from collections import Counter
+
 from rag_conflict_eval import ConflictInstance, ConflictType, load_conflicts, stratified_split
-from rag_conflict_eval.loader import _make_id
+from rag_conflict_eval.loader import _make_id, stratified_sample
 
 
 def test_load_sample(sample_path):
@@ -81,6 +83,19 @@ def test_split_seed_changes_assignment():
     _, test_0 = stratified_split(insts, test_size=0.3, seed=0)
     _, test_1 = stratified_split(insts, test_size=0.3, seed=1)
     assert {i.id for i in test_0} != {i.id for i in test_1}
+
+
+def test_stratified_sample_preserves_proportions():
+    insts = _balanced(10)  # 10 per type x 5 types = 50
+    s = stratified_sample(insts, 20, seed=0)
+    assert 18 <= len(s) <= 22
+    counts = Counter(i.conflict_type for i in s)
+    assert all(3 <= c <= 5 for c in counts.values())   # ~4 per type
+    # deterministic + order-independent
+    s2 = stratified_sample(list(reversed(insts)), 20, seed=0)
+    assert {i.id for i in s} == {i.id for i in s2}
+    # n >= len returns everything
+    assert len(stratified_sample(insts, 999)) == len(insts)
 
 
 def test_split_edge_sizes_and_tiny_class():

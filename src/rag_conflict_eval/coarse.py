@@ -19,7 +19,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 from .prompts.templates import (
     COARSE_DETECTION_PROMPT_VERSION,
@@ -66,9 +66,8 @@ class CoarseDetectionResult:
     label: Optional[CoarseConflict] = None
     said_uncertain: bool = False
     confidence: Optional[float] = None
-    can_all_claims_be_true: Optional[Any] = None
-    is_temporal_supersession: Optional[Any] = None
-    claims: Optional[list] = None
+    #: Full parsed JSON (answer_slot, claims, newer_supersedes, ...) for evidence/debug.
+    signals: Optional[dict] = None
     detector_model: Optional[str] = None
     prompt_version: Optional[str] = None
     raw_output: Optional[str] = None
@@ -100,9 +99,7 @@ def parse_coarse(text: str):
         return {
             "label": obj["label"],
             "confidence": float(conf) if isinstance(conf, (int, float)) else None,
-            "can_all_claims_be_true": obj.get("can_all_claims_be_true"),
-            "is_temporal_supersession": obj.get("is_temporal_supersession"),
-            "claims": obj.get("claims"),
+            "signals": obj,
         }
     return None
 
@@ -181,9 +178,7 @@ class CoarseConflictDetector:
             label=None if said_uncertain else _LABEL_TO_COARSE[label_str],
             said_uncertain=said_uncertain,
             confidence=parsed["confidence"],
-            can_all_claims_be_true=parsed["can_all_claims_be_true"],
-            is_temporal_supersession=parsed["is_temporal_supersession"],
-            claims=parsed["claims"],
+            signals=parsed["signals"],
             raw_output=raw,
         )
 

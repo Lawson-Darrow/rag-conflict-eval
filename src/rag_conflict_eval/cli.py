@@ -22,7 +22,7 @@ from .aggregate import AdherenceReport, aggregate
 from .coarse import CoarseConflict, CoarseConflictDetector, benchmark_coarse_detector
 from .detector import ABSTAIN, ERROR, ConflictTypeDetector, DetectorReport, benchmark_detector
 from .taxonomy import ConflictType
-from .loader import load_conflicts, record_to_instance, stratified_split
+from .loader import load_conflicts, record_to_instance, stratified_sample, stratified_split
 from .scorer import BehaviorAdherenceScorer
 from .types import AdherenceResult
 
@@ -132,10 +132,17 @@ def format_coarse_benchmark(bench) -> str:
     return "\n".join(lines)
 
 
-def _cmd_bench_coarse(args: argparse.Namespace) -> int:
-    instances = load_conflicts(args.data)
+def _select(instances, args):
+    """--sample N gives a stratified draw (preferred); --limit N takes the first N."""
+    if getattr(args, "sample", 0):
+        return stratified_sample(instances, args.sample, seed=getattr(args, "seed", 0))
     if args.limit:
-        instances = instances[: args.limit]
+        return instances[: args.limit]
+    return instances
+
+
+def _cmd_bench_coarse(args: argparse.Namespace) -> int:
+    instances = _select(load_conflicts(args.data), args)
     thresholds = tuple(float(x) for x in args.thresholds.split(","))
     detector = CoarseConflictDetector(model=args.model, judged_text_field=args.judged_text_field)
     bench = benchmark_coarse_detector(detector, instances, thresholds=thresholds)
@@ -155,9 +162,7 @@ def _cmd_bench_coarse(args: argparse.Namespace) -> int:
 
 
 def _cmd_bench_detector(args: argparse.Namespace) -> int:
-    instances = load_conflicts(args.data)
-    if args.limit:
-        instances = instances[: args.limit]
+    instances = _select(load_conflicts(args.data), args)
     detector = ConflictTypeDetector(model=args.model, judged_text_field=args.judged_text_field)
     report = benchmark_detector(detector, instances)
     print(format_detector_report(report))
@@ -238,6 +243,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["snippet", "short_text", "response_str"],
     )
     pb.add_argument("--limit", type=int, default=0, help="benchmark only the first N (cost control)")
+    pb.add_argument("--sample", type=int, default=0, help="stratified sample of N (preferred over --limit)")
+    pb.add_argument("--seed", type=int, default=0)
     pb.set_defaults(func=_cmd_bench_detector)
 
     pcz = sub.add_parser(
@@ -251,6 +258,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["snippet", "short_text", "response_str"],
     )
     pcz.add_argument("--limit", type=int, default=0, help="benchmark only the first N")
+    pcz.add_argument("--sample", type=int, default=0, help="stratified sample of N (preferred over --limit)")
+    pcz.add_argument("--seed", type=int, default=0)
     pcz.add_argument("--thresholds", default="0.6,0.7,0.8", help="comma-separated confidence cutoffs")
     pcz.add_argument("--out", help="write raw per-instance predictions JSONL here")
     pcz.set_defaults(func=_cmd_bench_coarse)

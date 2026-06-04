@@ -72,6 +72,28 @@ def _parse_record(rec: dict, *, line_no: int) -> ConflictInstance:
     )
 
 
+def stratified_sample(
+    instances: list[ConflictInstance], n: int, *, seed: int = 0
+) -> list[ConflictInstance]:
+    """Return a representative ~n-instance sample preserving per-type proportions.
+
+    Deterministic (per-type seeded shuffle, sorted-by-id first). Used so a small
+    benchmark draw isn't just the first N records of one type."""
+    if n >= len(instances):
+        return list(instances)
+    by_type: dict[ConflictType, list[ConflictInstance]] = {}
+    for inst in instances:
+        by_type.setdefault(inst.conflict_type, []).append(inst)
+    total = len(instances)
+    out: list[ConflictInstance] = []
+    for ctype in sorted(by_type, key=lambda c: c.value):
+        items = sorted(by_type[ctype], key=lambda i: i.id)
+        random.Random(f"{seed}:{ctype.value}").shuffle(items)
+        take = round(n * len(items) / total)
+        out.extend(items[:take])
+    return out
+
+
 def record_to_instance(rec: dict) -> ConflictInstance:
     """Build one :class:`ConflictInstance` from a raw CONFLICTS-style record."""
     return _parse_record(rec, line_no=0)
