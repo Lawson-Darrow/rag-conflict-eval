@@ -119,6 +119,15 @@ class AdherenceResult:
             self.label = AdherenceLabel(self.label)
         if isinstance(self.conflict_type, str):
             self.conflict_type = ConflictType(self.conflict_type)
+        # Reject non-enum junk that slipped past coercion (e.g. label=1).
+        if not isinstance(self.status, ResultStatus):
+            raise TypeError(f"status must be ResultStatus, got {type(self.status).__name__}")
+        if self.label is not None and not isinstance(self.label, AdherenceLabel):
+            raise TypeError(f"label must be AdherenceLabel or None, got {type(self.label).__name__}")
+        if not isinstance(self.conflict_type, ConflictType):
+            raise TypeError(
+                f"conflict_type must be ConflictType, got {type(self.conflict_type).__name__}"
+            )
         # Enforce the verdict/status invariant: a verdict exists iff status is OK.
         if self.status is ResultStatus.OK and self.label is None:
             raise ValueError("status=OK requires a label (adhere/not_adhere/uncertain)")

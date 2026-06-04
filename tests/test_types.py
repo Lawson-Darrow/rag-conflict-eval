@@ -30,6 +30,13 @@ def test_error_status_forbids_label():
         )
 
 
+def test_non_enum_junk_rejected():
+    with pytest.raises(TypeError, match="label must be AdherenceLabel"):
+        AdherenceResult(status=ResultStatus.OK, conflict_type=ConflictType.FRESHNESS, label=1)
+    with pytest.raises(TypeError, match="status must be ResultStatus"):
+        AdherenceResult(status=object(), conflict_type=ConflictType.FRESHNESS, label=None)
+
+
 def test_valid_error_result():
     r = AdherenceResult(
         status=ResultStatus.JUDGE_ERROR,
