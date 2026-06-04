@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from .aggregate import AdherenceReport, TypeReport, aggregate
 from .loader import LABEL_MAP, load_conflicts, stratified_split
+from .prompts.templates import PROMPT_VERSION, build_judge_prompt
+from .scorer import BehaviorAdherenceScorer, parse_verdict
 from .taxonomy import TAXONOMY, ConflictType, TypeSpec, spec_for
 from .types import (
     AdherenceLabel,
@@ -37,5 +39,10 @@ __all__ = [
     "AdherenceReport",
     "TypeReport",
     "aggregate",
+    # scoring
+    "BehaviorAdherenceScorer",
+    "parse_verdict",
+    "build_judge_prompt",
+    "PROMPT_VERSION",
     "__version__",
 ]
