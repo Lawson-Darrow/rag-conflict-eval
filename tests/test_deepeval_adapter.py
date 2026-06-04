@@ -3,6 +3,7 @@ import pytest
 from rag_conflict_eval import ConflictType
 from rag_conflict_eval.adapters.deepeval import (
     BehaviorAdherenceMetric,
+    aggregate_metrics,
     instance_from_test_case,
     map_result,
 )
@@ -10,7 +11,17 @@ from rag_conflict_eval.types import AdherenceLabel, AdherenceResult, ResultStatu
 
 
 class _TC:
-    """Minimal stand-in for a DeepEval LLMTestCase (duck-typed)."""
+    """Minimal stand-in for a DeepEval 4.x LLMTestCase (duck-typed)."""
+
+    def __init__(self, *, input="q", actual_output="a", retrieval_context=None, metadata=None):
+        self.input = input
+        self.actual_output = actual_output
+        self.retrieval_context = retrieval_context
+        self.metadata = metadata
+
+
+class _LegacyTC:
+    """Stand-in for older DeepEval using additional_metadata."""
 
     def __init__(self, *, input="q", actual_output="a", retrieval_context=None, metadata=None):
         self.input = input
@@ -48,6 +59,47 @@ def test_reconstruct_prefers_structured_search_results():
 def test_missing_conflict_type_raises():
     with pytest.raises(ValueError, match="conflict_type"):
         instance_from_test_case(_TC(metadata={}))
+
+
+def test_legacy_additional_metadata_fallback():
+    tc = _LegacyTC(retrieval_context=["s"], metadata={"conflict_type": "no_conflict"})
+    inst = instance_from_test_case(tc)
+    assert inst.conflict_type is ConflictType.NO_CONFLICT
+
+
+def test_retrieval_context_objects_use_context_attr():
+    class _Ctx:
+        def __init__(self, context, source):
+            self.context = context
+            self.source = source
+
+    tc = _TC(retrieval_context=[_Ctx("real text", "http://x")],
+             metadata={"conflict_type": "no_conflict"})
+    inst = instance_from_test_case(tc)
+    assert inst.search_results[0].short_text == "real text"
+    assert inst.search_results[0].url == "http://x"
+
+
+def test_empty_search_results_list_does_not_fall_back():
+    # Explicit empty list = "no sources"; must not reuse retrieval_context.
+    tc = _TC(retrieval_context=["leaked runtime ctx"],
+             metadata={"conflict_type": "no_conflict", "search_results": []})
+    inst = instance_from_test_case(tc)
+    assert inst.search_results == []
+
+
+def test_aggregate_metrics_uses_exclusion_semantics():
+    # Two measured metrics: one freshness adhere, one misinformation (experimental).
+    m1 = BehaviorAdherenceMetric(judge_fn=lambda _: '{"verdict": "adhere"}')
+    m1.measure(_TC(retrieval_context=["s"], metadata={"conflict_type": "freshness"}))
+    m2 = BehaviorAdherenceMetric(judge_fn=lambda _: '{"verdict": "not_adhere"}')
+    m2.measure(_TC(retrieval_context=["s"], metadata={"conflict_type": "misinformation"}))
+    unmeasured = BehaviorAdherenceMetric(judge_fn=lambda _: '{"verdict": "adhere"}')
+
+    rep = aggregate_metrics([m1, m2, unmeasured])
+    assert rep.n_total == 1                      # misinformation excluded, unmeasured skipped
+    assert rep.adherence_rate == 1.0
+    assert ConflictType.MISINFORMATION in rep.experimental_excluded
 
 
 # --- map_result ---
@@ -106,3 +158,20 @@ def test_judge_error_is_errored():
     assert m.score is None
     assert "api down" in m.error
     assert m.is_successful() is False
+
+
+def test_with_real_deepeval_test_case():
+    """Runs only when deepeval is installed: prove the metric works against a
+    real LLMTestCase, not just our duck-typed stand-in."""
+    pytest.importorskip("deepeval")
+    from deepeval.test_case import LLMTestCase
+
+    tc = LLMTestCase(
+        input="Who is the CEO?",
+        actual_output="As of 2024 the CEO is John Doe.",
+        retrieval_context=["In 2024 John Doe became CEO.", "In 2021 Jane Roe was CEO."],
+        metadata={"conflict_type": "freshness"},
+    )
+    m = BehaviorAdherenceMetric(judge_fn=lambda _: '{"verdict": "adhere"}')
+    assert m.measure(tc) == 1.0
+    assert m.is_successful() is True

@@ -3,7 +3,8 @@
 Exposes :class:`BehaviorAdherenceMetric`, a DeepEval ``BaseMetric`` that scores
 whether ``test_case.actual_output`` adheres to the expected behavior for the gold
 conflict type (oracle mode). The gold type is read from
-``test_case.additional_metadata["conflict_type"]``.
+``test_case.metadata["conflict_type"]`` (``additional_metadata`` also accepted for
+older DeepEval).
 
 The metric is ternary (adhere / not-adhere / uncertain) while DeepEval wants a
 scalar. We map deliberately so the headline number stays honest:
@@ -14,7 +15,16 @@ scalar. We map deliberately so the headline number stays honest:
     parse/judge error -> NO score; metric ERRORED
 
 Treating uncertain/errors as errored (not as 0.0) is the whole point: a silent 0
-would corrupt the aggregate. DeepEval surfaces errored metrics separately.
+would corrupt the aggregate. DeepEval stores these as ``MetricData(score=None,
+error=...)``, so they are NOT recorded as a 0.0.
+
+IMPORTANT — use DeepEval as an execution shell, not as the source of the number.
+DeepEval's own pass-rate counts an errored (uncertain) metric as a FAILURE in the
+denominator. That is NOT our exclusion semantics. For the honest behavior-adherence
+rate, collect each measured metric's ``.result`` and pass them to
+``aggregate_metrics()`` (or just use ``BehaviorAdherenceScorer`` + ``aggregate``
+directly and skip DeepEval). Likewise, do NOT average ``measure()`` return values:
+it returns 0.0 for uncertain/errored cases purely to satisfy the float signature.
 
 DeepEval is optional. This module imports without it (BaseMetric falls back to
 ``object``) so the pure helpers and ``measure()`` remain unit-testable; the real
@@ -23,8 +33,9 @@ DeepEval test-runner integration requires ``pip install rag-conflict-eval[deepev
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Iterable, Optional
 
+from ..aggregate import AdherenceReport, aggregate
 from ..scorer import BehaviorAdherenceScorer
 from ..taxonomy import ConflictType
 from ..types import AdherenceLabel, AdherenceResult, ConflictInstance, ResultStatus, SearchResult
@@ -38,6 +49,23 @@ except ImportError:  # pragma: no cover - exercised only when deepeval absent
     _HAS_DEEPEVAL = False
 
 
+def _search_result_from_context(c) -> SearchResult:
+    """Coerce one DeepEval ``retrieval_context`` item into a SearchResult.
+
+    Handles plain strings and structured objects (e.g. DeepEval's
+    ``RetrievedContextData`` with ``.context`` / ``.source``) so we don't feed a
+    repr into the judge.
+    """
+    if isinstance(c, SearchResult):
+        return c
+    if isinstance(c, str):
+        return SearchResult(short_text=c)
+    text = getattr(c, "context", None)
+    if isinstance(text, str):
+        return SearchResult(short_text=text, url=getattr(c, "source", None))
+    return SearchResult(short_text=str(c))
+
+
 def instance_from_test_case(test_case) -> ConflictInstance:
     """Reconstruct a :class:`ConflictInstance` from a DeepEval ``LLMTestCase``.
 
@@ -46,26 +74,31 @@ def instance_from_test_case(test_case) -> ConflictInstance:
     structured ``additional_metadata['search_results']`` when present, else from
     DeepEval's ``retrieval_context`` strings.
     """
-    md = getattr(test_case, "additional_metadata", None) or {}
+    # DeepEval 4.x renamed `additional_metadata` -> `metadata`; support both.
+    md = getattr(test_case, "metadata", None)
+    if md is None:
+        md = getattr(test_case, "additional_metadata", None)
+    md = md or {}
     ct = md.get("conflict_type")
     if ct is None:
         raise ValueError(
-            "BehaviorAdherenceMetric requires additional_metadata['conflict_type'] "
+            "BehaviorAdherenceMetric requires metadata['conflict_type'] "
             "(the gold conflict type) on the test case."
         )
     conflict_type = ct if isinstance(ct, ConflictType) else ConflictType(ct)
 
-    sr_meta = md.get("search_results")
-    if sr_meta:
+    # Key presence (not truthiness): an explicit empty list means "no sources",
+    # and must NOT fall back to retrieval_context.
+    if "search_results" in md:
         results = [
             s if isinstance(s, SearchResult)
             else SearchResult(**s) if isinstance(s, dict)
             else SearchResult(short_text=str(s))
-            for s in sr_meta
+            for s in (md["search_results"] or [])
         ]
     else:
         results = [
-            SearchResult(short_text=str(c))
+            _search_result_from_context(c)
             for c in (getattr(test_case, "retrieval_context", None) or [])
         ]
 
@@ -103,6 +136,8 @@ class BehaviorAdherenceMetric(BaseMetric):
     ) -> None:
         self.threshold = threshold
         self.include_reason = include_reason
+        #: Surfaced by DeepEval's reporting ("using <evaluation_model>").
+        self.evaluation_model = model
         self._scorer = BehaviorAdherenceScorer(
             model=model, judge_fn=judge_fn, judged_text_field=judged_text_field
         )
@@ -138,3 +173,18 @@ class BehaviorAdherenceMetric(BaseMetric):
     @property
     def __name__(self) -> str:
         return "Behavior Adherence"
+
+
+def aggregate_metrics(
+    metrics: Iterable["BehaviorAdherenceMetric"], *, exclude_experimental: bool = True
+) -> AdherenceReport:
+    """Honest behavior-adherence aggregate from a set of MEASURED metrics.
+
+    Use this instead of DeepEval's built-in pass-rate, which counts uncertain/
+    errored metrics as failures rather than excluding them. Skips metrics that
+    were never measured (``.result is None``).
+    """
+    return aggregate(
+        [m.result for m in metrics if m.result is not None],
+        exclude_experimental=exclude_experimental,
+    )
