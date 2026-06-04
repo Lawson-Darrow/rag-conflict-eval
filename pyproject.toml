@@ -30,8 +30,8 @@ dev = ["pytest>=8.0", "ruff>=0.5", "mypy>=1.10"]
 rag-conflict-eval = "rag_conflict_eval.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/lawson-darrow/rag-conflict-eval"
-Issues = "https://github.com/lawson-darrow/rag-conflict-eval/issues"
+Homepage = "https://github.com/Lawson-Darrow/rag-conflict-eval"
+Issues = "https://github.com/Lawson-Darrow/rag-conflict-eval/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rag_conflict_eval"]
