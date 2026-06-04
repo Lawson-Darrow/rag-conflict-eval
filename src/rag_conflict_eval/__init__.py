@@ -3,6 +3,14 @@
 from __future__ import annotations
 
 from .aggregate import AdherenceReport, TypeReport, aggregate
+from .coarse import (
+    CoarseConflict,
+    CoarseConflictDetector,
+    CoarseDetectionResult,
+    FINE_TO_COARSE,
+    benchmark_coarse_detector,
+    resolve,
+)
 from .detector import (
     ConflictTypeDetector,
     DetectionResult,
@@ -50,10 +58,17 @@ __all__ = [
     "parse_verdict",
     "build_judge_prompt",
     "PROMPT_VERSION",
-    # detection
+    # detection (fine, oracle)
     "ConflictTypeDetector",
     "DetectionResult",
     "DetectorReport",
     "benchmark_detector",
+    # coarse detection (auto / false-consensus wedge)
+    "CoarseConflict",
+    "CoarseConflictDetector",
+    "CoarseDetectionResult",
+    "FINE_TO_COARSE",
+    "benchmark_coarse_detector",
+    "resolve",
     "__version__",
 ]

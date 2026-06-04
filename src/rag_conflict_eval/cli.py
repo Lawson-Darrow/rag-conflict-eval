@@ -19,6 +19,7 @@ import sys
 from collections import Counter
 
 from .aggregate import AdherenceReport, aggregate
+from .coarse import CoarseConflict, CoarseConflictDetector, benchmark_coarse_detector
 from .detector import ABSTAIN, ERROR, ConflictTypeDetector, DetectorReport, benchmark_detector
 from .taxonomy import ConflictType
 from .loader import load_conflicts, record_to_instance, stratified_split
@@ -102,6 +103,55 @@ def format_detector_report(report: DetectorReport) -> str:
         ]
         lines.append(f"    {gold.value:<22} -> {', '.join(cells) if cells else '(none)'}")
     return "\n".join(lines)
+
+
+def format_coarse_benchmark(bench) -> str:
+    def _f(x):
+        return f"{x:.3f}" if x is not None else "n/a"
+
+    lines = ["coarse conflict detection (auto mode):"]
+    for t, rep in sorted(bench.by_threshold.items()):
+        b = rep.binary
+        lines.append(f"  --- threshold {t:.2f} ---")
+        lines.append(
+            f"    macro-F1={_f(rep.macro_f1)} coverage={rep.coverage:.3f} "
+            f"acc_on_covered={_f(rep.accuracy_on_covered)} "
+            f"abstained={rep.abstention_rate:.3f} errors={rep.error_rate:.3f}"
+        )
+        lines.append(
+            f"    false-consensus detection (conflict vs none): "
+            f"P={_f(b.get('precision'))} R={_f(b.get('recall'))} F1={_f(b.get('f1'))} "
+            f"acc={_f(b.get('accuracy'))} (tp={b['tp']} fp={b['fp']} fn={b['fn']} tn={b['tn']})"
+        )
+        for c in CoarseConflict:
+            m = rep.per_class[c]
+            lines.append(
+                f"      {c.value:<22} P={_f(m['precision'])} R={_f(m['recall'])} "
+                f"F1={_f(m['f1'])} support={m['support']}"
+            )
+    return "\n".join(lines)
+
+
+def _cmd_bench_coarse(args: argparse.Namespace) -> int:
+    instances = load_conflicts(args.data)
+    if args.limit:
+        instances = instances[: args.limit]
+    thresholds = tuple(float(x) for x in args.thresholds.split(","))
+    detector = CoarseConflictDetector(model=args.model, judged_text_field=args.judged_text_field)
+    bench = benchmark_coarse_detector(detector, instances, thresholds=thresholds)
+    print(format_coarse_benchmark(bench))
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as f:
+            for gold, res in zip(bench.golds, bench.results):
+                f.write(json.dumps({
+                    "instance_id": res.instance_id,
+                    "gold_coarse": gold.value,
+                    "status": res.status.value,
+                    "label": res.label.value if res.label else None,
+                    "said_uncertain": res.said_uncertain,
+                    "confidence": res.confidence,
+                }) + "\n")
+    return 0
 
 
 def _cmd_bench_detector(args: argparse.Namespace) -> int:
@@ -189,6 +239,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pb.add_argument("--limit", type=int, default=0, help="benchmark only the first N (cost control)")
     pb.set_defaults(func=_cmd_bench_detector)
+
+    pcz = sub.add_parser(
+        "bench-coarse",
+        help="benchmark the COARSE conflict detector (auto mode) vs gold labels",
+    )
+    pcz.add_argument("data", help="path to conflicts.jsonl (gold-labeled)")
+    pcz.add_argument("--model", default="gpt-4o-mini", help="litellm detector model")
+    pcz.add_argument(
+        "--judged-text-field", default="short_text",
+        choices=["snippet", "short_text", "response_str"],
+    )
+    pcz.add_argument("--limit", type=int, default=0, help="benchmark only the first N")
+    pcz.add_argument("--thresholds", default="0.6,0.7,0.8", help="comma-separated confidence cutoffs")
+    pcz.add_argument("--out", help="write raw per-instance predictions JSONL here")
+    pcz.set_defaults(func=_cmd_bench_coarse)
     return p
 
 
