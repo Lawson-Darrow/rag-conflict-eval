@@ -75,7 +75,9 @@ def _det(status=ResultStatus.OK, label=None, said_uncertain=False, signals=None)
 
 
 def _pipe(det_result, judge_ret=None):
+    # uncalibrated: decision uses det.label directly (the JSON-detector path)
     return AutoPipeline(
+        calibrated=False,
         detector=_FakeDetector(det_result),
         judge=_FakeJudge(judge_ret) if judge_ret is not None else _FakeJudge(
             (ResultStatus.OK, AutoVerdict.OK, "fine", None)
@@ -94,10 +96,37 @@ def test_no_conflict_is_ok_judge_not_run():
             judge_called["n"] += 1
             return (ResultStatus.OK, AutoVerdict.OK, None, None)
 
-    pipe = AutoPipeline(detector=_FakeDetector(_det(label=NMI)), judge=_CountJudge(None))
+    pipe = AutoPipeline(calibrated=False, detector=_FakeDetector(_det(label=NMI)),
+                        judge=_CountJudge(None))
     r = pipe.run(_TRACE)
     assert r.verdict is AutoVerdict.OK and r.needs_review is False
     assert judge_called["n"] == 0          # judge skipped when no conflict
+
+
+# --- calibrated path (decision via confidence threshold + JSON evidence pass) ---
+
+def test_calibrated_high_confidence_conflict_flags_and_gets_evidence():
+    cal = _FakeDetector(_det(label=SD, signals={"distribution": {"D": 0.9}}))
+    cal.result.confidence = 0.9
+    ev = _FakeDetector(_det(label=SD, signals={"answer_slot": "the CEO", "claims": [{"source": 1}]}))
+    pipe = AutoPipeline(calibrated=True, abstain_threshold=0.6, detector=cal, evidence_detector=ev,
+                        judge=_FakeJudge((ResultStatus.OK, AutoVerdict.FALSE_CONSENSUS_RISK, "picked a side", "It's X.")))
+    r = pipe.run(_TRACE)
+    assert r.verdict is AutoVerdict.FALSE_CONSENSUS_RISK and r.needs_review is True
+    assert r.detector_confidence == 0.9
+    assert r.evidence["answer_slot"] == "the CEO"       # from the JSON evidence pass
+    assert r.evidence["claims"] == [{"source": 1}]
+
+
+def test_calibrated_low_confidence_abstains():
+    cal = _FakeDetector(_det(label=SD))
+    cal.result.confidence = 0.4                          # below threshold 0.6
+    pipe = AutoPipeline(calibrated=True, abstain_threshold=0.6, detector=cal,
+                        evidence_detector=_FakeDetector(_det(label=SD)),
+                        judge=_FakeJudge((ResultStatus.OK, AutoVerdict.FALSE_CONSENSUS_RISK, "x", None)))
+    r = pipe.run(_TRACE)
+    assert r.verdict is AutoVerdict.OK and r.needs_review is False
+    assert r.detector_abstained is True and r.detector_confidence == 0.4
 
 
 def test_conflict_flagged_false_consensus():

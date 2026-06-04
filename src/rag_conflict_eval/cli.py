@@ -217,7 +217,10 @@ def format_auto_results(results: list[AutoResult]) -> str:
 
 def _cmd_auto(args: argparse.Namespace) -> int:
     traces = load_traces(args.traces)
-    pipe = AutoPipeline(model=args.model, judged_text_field=args.judged_text_field)
+    pipe = AutoPipeline(
+        model=args.model, judged_text_field=args.judged_text_field,
+        calibrated=args.calibrated, abstain_threshold=args.threshold,
+    )
     results = pipe.run_batch(traces)
     print(format_auto_results(results))
     if args.out:
@@ -333,6 +336,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--judged-text-field", default="short_text",
         choices=["snippet", "short_text", "response_str"],
     )
+    pa.add_argument(
+        "--calibrated", action=argparse.BooleanOptionalAction, default=True,
+        help="use logprob-calibrated detection w/ abstention (default; --no-calibrated for 1 JSON call)",
+    )
+    pa.add_argument("--threshold", type=float, default=0.6, help="calibrated abstain threshold")
     pa.add_argument("--out", help="write full per-trace results JSONL here")
     pa.set_defaults(func=_cmd_auto)
     return p

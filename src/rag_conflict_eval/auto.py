@@ -21,7 +21,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Callable, Optional
 
-from .coarse import CoarseConflict, CoarseConflictDetector, CoarseDetectionResult
+from .coarse import (
+    CalibratedCoarseDetector,
+    CoarseConflict,
+    CoarseConflictDetector,
+    resolve,
+)
 from .prompts.templates import (
     AUTO_BEHAVIOR_PROMPT_VERSION,
     build_auto_behavior_prompt,
@@ -100,6 +105,8 @@ class AutoResult:
     detector_abstained: bool = False
     #: Raw detector label string ("abstain" / a coarse label / None on error).
     detector_label: Optional[str] = None
+    #: Calibrated detector confidence (None for the uncalibrated JSON detector).
+    detector_confidence: Optional[float] = None
     #: Status of the behavior judge call (None if it wasn't run).
     behavior_status: Optional[ResultStatus] = None
     #: Detector evidence: answer_slot, per-source claims, newer_supersedes, snippets.
@@ -185,34 +192,60 @@ _CONFLICT_LABELS = (CoarseConflict.SOURCE_DIVERGENCE, CoarseConflict.TEMPORAL_SU
 
 
 class AutoPipeline:
+    """Trace -> conflict detection -> (if a conflict) false-consensus judge.
+
+    By default uses the logprob-CALIBRATED detector (better precision + real
+    abstention) for the decision, and the JSON detector for per-source evidence
+    (claims) on flagged traces only. Set ``calibrated=False`` for a single
+    JSON call (no logprobs needed; portable to providers without logprobs).
+    """
+
     def __init__(
         self,
         model: str = "gpt-4o-mini",
         *,
         judged_text_field: JudgedTextField = "short_text",
-        detector: Optional[CoarseConflictDetector] = None,
+        calibrated: bool = True,
+        abstain_threshold: float = 0.6,
+        detector=None,
+        evidence_detector=None,
         judge: Optional[AutoBehaviorJudge] = None,
     ) -> None:
-        self.detector = detector or CoarseConflictDetector(
-            model=model, judged_text_field=judged_text_field
-        )
+        self.judged_text_field = judged_text_field
+        self.calibrated = calibrated
+        self.abstain_threshold = abstain_threshold
+        if detector is not None:
+            self.detector = detector
+        elif calibrated:
+            self.detector = CalibratedCoarseDetector(model=model, judged_text_field=judged_text_field)
+        else:
+            self.detector = CoarseConflictDetector(model=model, judged_text_field=judged_text_field)
+        # JSON detector for per-source claim evidence (only used in calibrated mode,
+        # only on flagged traces). In uncalibrated mode the primary detector already
+        # carries the evidence.
+        self.evidence_detector = evidence_detector
+        if calibrated and self.evidence_detector is None:
+            self.evidence_detector = CoarseConflictDetector(
+                model=model, judged_text_field=judged_text_field
+            )
         self.judge = judge or AutoBehaviorJudge(model=model, judged_text_field=judged_text_field)
 
-    def _evidence(self, det: CoarseDetectionResult, trace: Trace) -> dict:
-        sig = det.signals or {}
+    def _evidence(self, signals: Optional[dict], trace: Trace, confidence=None) -> dict:
+        sig = signals or {}
         return {
             "answer_slot": sig.get("answer_slot"),
             "claims": sig.get("claims"),
             "newer_supersedes": sig.get("newer_supersedes"),
+            "detector_confidence": confidence,
             "sources": [
-                {"title": s.title, "date": s.date, "text": s.text(self.detector.judged_text_field)}
+                {"title": s.title, "date": s.date, "text": s.text(self.judged_text_field)}
                 for s in trace.search_results
             ],
         }
 
     def run(self, trace: Trace) -> AutoResult:
         det = self.detector.detect(trace)
-        evidence = self._evidence(det, trace)
+        evidence = self._evidence(det.signals, trace, det.confidence)
 
         if det.status is not ResultStatus.OK:
             return AutoResult(
@@ -221,34 +254,47 @@ class AutoPipeline:
                 rationale="conflict detection failed", evidence=evidence,
             )
 
-        label = det.label
-        if label not in _CONFLICT_LABELS:
-            # detector abstained, or said no material conflict -> nothing to judge,
-            # but keep the two cases distinguishable (don't dress abstain up as "ok").
+        # Decision: calibrated applies a confidence threshold (real abstention);
+        # uncalibrated uses the label directly.
+        if self.calibrated:
+            predicted = resolve(det, self.abstain_threshold)
+            abstained = predicted is None
+        else:
+            predicted = det.label
             abstained = det.said_uncertain
+
+        if predicted not in _CONFLICT_LABELS:
             return AutoResult(
-                trace_id=trace.id, detector_status=ResultStatus.OK, conflict=label,
+                trace_id=trace.id, detector_status=ResultStatus.OK, conflict=predicted,
                 verdict=AutoVerdict.OK, needs_review=False,
-                detector_abstained=abstained,
-                detector_label="abstain" if abstained else (label.value if label else None),
+                detector_abstained=abstained, detector_confidence=det.confidence,
+                detector_label="abstain" if abstained else (predicted.value if predicted else None),
                 rationale=(
-                    "detector abstained; conflict undetermined, judge not run"
+                    "detector abstained (low confidence); judge not run"
                     if abstained else "no material source conflict detected"
                 ),
                 evidence=evidence,
             )
 
-        status, verdict, rationale, span = self.judge.judge(trace, label.value)
+        # Conflict flagged. In calibrated mode, fetch richer per-source claims from
+        # the JSON detector (one extra call, only on flagged traces).
+        if self.calibrated and self.evidence_detector is not None:
+            ev = self.evidence_detector.detect(trace)
+            if ev.status is ResultStatus.OK:
+                evidence = self._evidence(ev.signals, trace, det.confidence)
+
+        status, verdict, rationale, span = self.judge.judge(trace, predicted.value)
         if status is not ResultStatus.OK:
             return AutoResult(
-                trace_id=trace.id, detector_status=ResultStatus.OK, conflict=label,
-                detector_label=label.value, verdict=AutoVerdict.UNCLEAR, needs_review=True,
+                trace_id=trace.id, detector_status=ResultStatus.OK, conflict=predicted,
+                detector_label=predicted.value, detector_confidence=det.confidence,
+                verdict=AutoVerdict.UNCLEAR, needs_review=True,
                 rationale="behavior judge failed", behavior_status=status, evidence=evidence,
             )
         return AutoResult(
-            trace_id=trace.id, detector_status=ResultStatus.OK, conflict=label,
-            detector_label=label.value, verdict=verdict,
-            needs_review=verdict is not AutoVerdict.OK,
+            trace_id=trace.id, detector_status=ResultStatus.OK, conflict=predicted,
+            detector_label=predicted.value, detector_confidence=det.confidence,
+            verdict=verdict, needs_review=verdict is not AutoVerdict.OK,
             rationale=rationale, risky_answer_span=span, behavior_status=status, evidence=evidence,
         )
 
