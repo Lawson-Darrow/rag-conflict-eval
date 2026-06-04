@@ -21,7 +21,7 @@ from typing import Callable, Optional
 from .prompts.templates import (
     DETECTION_PROMPT_VERSION,
     build_detection_prompt,
-    build_repair_message,
+    build_detection_repair_message,
 )
 from .taxonomy import ConflictType, spec_for
 from .types import ConflictInstance, JudgedTextField, ResultStatus
@@ -123,7 +123,10 @@ class ConflictTypeDetector:
 
         verdict, rationale = parse_detection(raw)
         if verdict is None:
-            repair = messages + [{"role": "assistant", "content": raw}, build_repair_message(raw)]
+            repair = messages + [
+                {"role": "assistant", "content": raw},
+                build_detection_repair_message(raw),
+            ]
             try:
                 raw2 = self._call(repair)
             except Exception as e:
@@ -199,6 +202,11 @@ class DetectorReport:
     @property
     def accuracy_on_covered(self) -> Optional[float]:
         return self.n_correct / self.n_predicted if self.n_predicted else None
+
+    @property
+    def accuracy_strict(self) -> Optional[float]:
+        """Correct over ALL items — abstain and error count as wrong."""
+        return self.n_correct / self.n_total if self.n_total else None
 
     @property
     def coverage(self) -> float:

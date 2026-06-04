@@ -242,12 +242,26 @@ def build_detection_prompt(
 
 
 def build_repair_message(bad_output: str) -> dict:
-    """A follow-up user turn asking the judge to fix non-conforming output."""
+    """A follow-up user turn asking the rater to fix non-conforming output."""
     return {
         "role": "user",
         "content": (
             "Your previous reply was not a valid JSON object matching the schema. "
             'Reply with ONLY the JSON object: {"verdict": "adhere"|"not_adhere"|'
             '"uncertain", "rationale": "<one sentence>"}. No prose, no code fences.'
+        ),
+    }
+
+
+def build_detection_repair_message(bad_output: str) -> dict:
+    """A follow-up user turn asking the DETECTOR to fix non-conforming output."""
+    return {
+        "role": "user",
+        "content": (
+            "Your previous reply was not a valid JSON object matching the schema. "
+            'Reply with ONLY the JSON object: {"conflict_type": one of '
+            "[no_conflict, complementary, conflicting_opinions, freshness, "
+            'misinformation, uncertain], "rationale": "<one sentence>"}. '
+            "No prose, no code fences."
         ),
     }

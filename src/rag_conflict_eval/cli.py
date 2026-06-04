@@ -19,7 +19,8 @@ import sys
 from collections import Counter
 
 from .aggregate import AdherenceReport, aggregate
-from .detector import ConflictTypeDetector, DetectorReport, benchmark_detector
+from .detector import ABSTAIN, ERROR, ConflictTypeDetector, DetectorReport, benchmark_detector
+from .taxonomy import ConflictType
 from .loader import load_conflicts, record_to_instance, stratified_split
 from .scorer import BehaviorAdherenceScorer
 from .types import AdherenceResult
@@ -74,14 +75,32 @@ def format_detector_report(report: DetectorReport) -> str:
     if report.experimental_excluded:
         excl = ", ".join(t.value for t in report.experimental_excluded)
         lines.append(f"  excluded from macro-F1 (experimental): {excl}")
+    strict = report.accuracy_strict
+    lines.append(
+        "  strict accuracy (abstain/error = wrong): "
+        + (f"{strict:.3f}" if strict is not None else "n/a")
+    )
+
+    def _f(x):
+        return f"{x:.3f}" if x is not None else "n/a"
+
     lines.append("  per-type (precision / recall / f1 / support):")
     for t, m in sorted(report.per_class.items(), key=lambda kv: kv[0].value):
-        def _f(x):
-            return f"{x:.3f}" if x is not None else "n/a"
         lines.append(
             f"    {t.value:<22} {_f(m.precision):>6} / {_f(m.recall):>6} / "
             f"{_f(m.f1):>6} / {m.support}"
         )
+
+    # Confusion: per gold type, the distribution of predictions (incl. abstain/error).
+    lines.append("  confusion (gold -> predicted counts):")
+    pred_keys = [t.value for t in ConflictType] + [ABSTAIN, ERROR]
+    for gold in sorted(report.per_class, key=lambda t: t.value):
+        cells = [
+            f"{k}:{report.confusion.get((gold, k), 0)}"
+            for k in pred_keys
+            if report.confusion.get((gold, k), 0)
+        ]
+        lines.append(f"    {gold.value:<22} -> {', '.join(cells) if cells else '(none)'}")
     return "\n".join(lines)
 
 

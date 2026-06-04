@@ -81,6 +81,21 @@ def test_detect_repair_recovers():
     assert r.predicted is ConflictType.NO_CONFLICT
 
 
+def test_detect_repair_uses_detection_schema():
+    # The repair turn must ask for {"conflict_type": ...}, not the rater's {"verdict": ...}.
+    seen = []
+
+    def judge(messages):
+        seen.append(messages)
+        return "junk" if len(seen) == 1 else '{"conflict_type": "freshness"}'
+
+    r = ConflictTypeDetector(judge_fn=judge).detect(_inst())
+    assert r.predicted is ConflictType.FRESHNESS
+    repair_user = [m["content"] for m in seen[1] if m["role"] == "user"]
+    assert any("conflict_type" in c for c in repair_user)
+    assert not any('"verdict"' in c for c in repair_user)
+
+
 # --- benchmark math (fake detector, hand-computed scenario) ---
 
 class _FakeDetector:
@@ -139,3 +154,16 @@ def test_benchmark_confusion_and_macro_f1():
     assert misinfo in rep.experimental_excluded
     assert misinfo not in rep.macro_classes
     assert rep.macro_f1 == pytest.approx((2 / 3 + 0.0 + 0.0 + 2 / 3) / 4, abs=1e-6)
+    assert rep.accuracy_strict == 3 / 6     # abstain + error count as wrong
+
+
+def test_format_detector_report_shows_confusion_and_strict():
+    from rag_conflict_eval.cli import format_detector_report
+
+    instances = [_inst("A", ConflictType.FRESHNESS), _inst("B", ConflictType.NO_CONFLICT)]
+    by_id = {"A": _ok(ConflictType.FRESHNESS), "B": _ok(abstained=True)}
+    text = format_detector_report(benchmark_detector(_FakeDetector(by_id), instances))
+    assert "macro-F1" in text
+    assert "strict accuracy" in text
+    assert "confusion" in text
+    assert "abstain:1" in text
