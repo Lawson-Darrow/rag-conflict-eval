@@ -39,6 +39,12 @@ class TypeSpec:
     experimental: bool = False
 
 
+# NOTE: ``has_gold_answer`` reflects the RELEASED dataset, which populates
+# ``correct_answer`` for all five types (verified against conflicts.jsonl, 458/458).
+# The paper's annotation guidelines describe writing a correct answer only for
+# No-conflict / Freshness / Misinformation; for Complementary and
+# Conflicting-opinions the released ``correct_answer`` is a reference synthesis,
+# and behavior adherence for those types does NOT reduce to matching it.
 TAXONOMY: dict[ConflictType, TypeSpec] = {
     ConflictType.NO_CONFLICT: TypeSpec(
         type=ConflictType.NO_CONFLICT,
@@ -64,7 +70,7 @@ TAXONOMY: dict[ConflictType, TypeSpec] = {
             "Consolidate and reconcile the different partial answers provided by the "
             "retrieved documents, without framing the response as a debate."
         ),
-        has_gold_answer=False,
+        has_gold_answer=True,
         dataset_count=115,
     ),
     ConflictType.CONFLICTING_OPINIONS: TypeSpec(
@@ -77,7 +83,7 @@ TAXONOMY: dict[ConflictType, TypeSpec] = {
             "Explicitly reflect the debate between the retrieved sources and neutrally "
             "summarize the different viewpoints."
         ),
-        has_gold_answer=False,
+        has_gold_answer=True,
         dataset_count=115,
     ),
     ConflictType.FRESHNESS: TypeSpec(
