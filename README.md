@@ -119,6 +119,28 @@ scorer = BehaviorAdherenceScorer(model="gpt-4o-mini")
 print(scorer.score(instances[0], "As of 2024 the CEO is John Doe.").label)
 ```
 
+## Integrations
+
+Drop it into the eval framework you already use:
+
+```python
+# RAGAS — a false-consensus safety metric on a standard sample (higher = safer)
+from ragas import SingleTurnSample
+from rag_conflict_eval.adapters.ragas import FalseConsensusSafety
+score = FalseConsensusSafety().single_turn_score(
+    SingleTurnSample(user_input="...", retrieved_contexts=[...], response="...")
+)  # 1.0 ok · 0.0 risk · NaN unclear
+
+# DeepEval — behavior-adherence metric (oracle mode; gold conflict_type in metadata)
+from deepeval.test_case import LLMTestCase
+from rag_conflict_eval.adapters.deepeval import BehaviorAdherenceMetric
+m = BehaviorAdherenceMetric()
+m.measure(LLMTestCase(input="...", actual_output="...", retrieval_context=[...],
+                      metadata={"conflict_type": "freshness"}))
+```
+
+Install the extra you need: `pip install -e ".[ragas]"` or `".[deepeval]"`.
+
 ## Two modes
 
 - **Oracle** — you supply the gold conflict type; the clean, trusted measurement.

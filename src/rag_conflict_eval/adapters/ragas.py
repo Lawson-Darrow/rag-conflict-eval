@@ -1,6 +1,6 @@
-"""RAGAS adapter: a `false_consensus_risk` metric for RAGAS eval pipelines.
+"""RAGAS adapter: a `false_consensus_safety` metric for RAGAS eval pipelines.
 
-Exposes :class:`FalseConsensusRisk`, a RAGAS ``SingleTurnMetric`` that runs auto
+Exposes :class:`FalseConsensusSafety`, a RAGAS ``SingleTurnMetric`` that runs auto
 mode on a standard RAGAS sample (``user_input`` / ``retrieved_contexts`` /
 ``response`` — no gold labels) and returns a safety score:
 
@@ -52,7 +52,7 @@ def score_trace(pipeline: AutoPipeline, question, contexts, answer) -> tuple[flo
     return verdict_to_score(result.verdict), result
 
 
-class FalseConsensusRisk(SingleTurnMetric):
+class FalseConsensusSafety(SingleTurnMetric):
     """RAGAS metric: flags answers that mishandle conflicting retrieved sources."""
 
     def __init__(
@@ -61,7 +61,7 @@ class FalseConsensusRisk(SingleTurnMetric):
         model: str = "gpt-4o-mini",
         judged_text_field: str = "short_text",
         pipeline: AutoPipeline | None = None,
-        name: str = "false_consensus_risk",
+        name: str = "false_consensus_safety",
     ) -> None:
         self.name = name
         self._required_columns = (
@@ -91,4 +91,4 @@ class FalseConsensusRisk(SingleTurnMetric):
         return isinstance(score, float) and math.isnan(score)
 
 
-__all__ = ["FalseConsensusRisk", "verdict_to_score", "score_trace"]
+__all__ = ["FalseConsensusSafety", "verdict_to_score", "score_trace"]

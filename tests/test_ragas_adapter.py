@@ -4,7 +4,7 @@ import math
 import pytest
 
 from rag_conflict_eval.adapters.ragas import (
-    FalseConsensusRisk,
+    FalseConsensusSafety,
     score_trace,
     verdict_to_score,
 )
@@ -58,23 +58,23 @@ def test_score_trace_builds_trace_and_scores():
 # --- metric (no ragas runtime needed: object base + asyncio) ---
 
 def test_metric_ascore_ok():
-    m = FalseConsensusRisk(pipeline=_FakePipeline(_ar(AutoVerdict.OK)))
+    m = FalseConsensusSafety(pipeline=_FakePipeline(_ar(AutoVerdict.OK)))
     s = _Sample("q", ["c"], "ans")
     assert asyncio.run(m._single_turn_ascore(s)) == 1.0
     assert m.last_result.verdict is AutoVerdict.OK
 
 
 def test_metric_ascore_risk_and_unclear():
-    m = FalseConsensusRisk(pipeline=_FakePipeline(_ar(AutoVerdict.STALE_SOURCE_RISK)))
+    m = FalseConsensusSafety(pipeline=_FakePipeline(_ar(AutoVerdict.STALE_SOURCE_RISK)))
     assert asyncio.run(m._single_turn_ascore(_Sample("q", ["c"], "a"))) == 0.0
 
-    m2 = FalseConsensusRisk(pipeline=_FakePipeline(_ar(AutoVerdict.UNCLEAR)))
+    m2 = FalseConsensusSafety(pipeline=_FakePipeline(_ar(AutoVerdict.UNCLEAR)))
     assert math.isnan(asyncio.run(m2._single_turn_ascore(_Sample("q", ["c"], "a"))))
 
 
 def test_metric_name_and_init_noop():
-    m = FalseConsensusRisk(pipeline=_FakePipeline(_ar(AutoVerdict.OK)))
-    assert m.name == "false_consensus_risk"
+    m = FalseConsensusSafety(pipeline=_FakePipeline(_ar(AutoVerdict.OK)))
+    assert m.name == "false_consensus_safety"
     assert m.init() is None  # no-op
 
 
@@ -83,6 +83,6 @@ def test_with_real_ragas():
     pytest.importorskip("ragas")
     from ragas.dataset_schema import SingleTurnSample
 
-    m = FalseConsensusRisk(pipeline=_FakePipeline(_ar(AutoVerdict.FALSE_CONSENSUS_RISK)))
+    m = FalseConsensusSafety(pipeline=_FakePipeline(_ar(AutoVerdict.FALSE_CONSENSUS_RISK)))
     sample = SingleTurnSample(user_input="q", retrieved_contexts=["A", "B"], response="x")
     assert m.single_turn_score(sample) == 0.0
