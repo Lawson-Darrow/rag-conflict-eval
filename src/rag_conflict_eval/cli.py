@@ -176,6 +176,8 @@ def _auto_result_to_dict(r: AutoResult) -> dict:
         "verdict": r.verdict.value,
         "needs_review": r.needs_review,
         "conflict": r.conflict.value if r.conflict else None,
+        "detector_label": r.detector_label,
+        "detector_abstained": r.detector_abstained,
         "rationale": r.rationale,
         "risky_answer_span": r.risky_answer_span,
         "detector_status": r.detector_status.value,

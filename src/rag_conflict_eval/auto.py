@@ -76,7 +76,10 @@ class Trace:
     def id(self) -> str:
         if self.trace_id:
             return self.trace_id
-        return hashlib.sha1(f"{self.question}\x00{self.answer}".encode("utf-8")).hexdigest()[:12]
+        # Include contexts: same question/answer over different retrieval is a
+        # distinct trace and must not collide.
+        key = json.dumps([self.question, self.answer, self.contexts], sort_keys=True, default=str)
+        return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
 
     @property
     def search_results(self) -> list[SearchResult]:
@@ -93,6 +96,10 @@ class AutoResult:
     needs_review: bool
     rationale: Optional[str] = None
     risky_answer_span: Optional[str] = None
+    #: True when the detector abstained (distinct from a real no-conflict "ok").
+    detector_abstained: bool = False
+    #: Raw detector label string ("abstain" / a coarse label / None on error).
+    detector_label: Optional[str] = None
     #: Status of the behavior judge call (None if it wasn't run).
     behavior_status: Optional[ResultStatus] = None
     #: Detector evidence: answer_slot, per-source claims, newer_supersedes, snippets.
@@ -215,24 +222,33 @@ class AutoPipeline:
             )
 
         label = det.label
-        if label is None or label not in _CONFLICT_LABELS:
-            # no material conflict (or abstained) -> nothing to mishandle
+        if label not in _CONFLICT_LABELS:
+            # detector abstained, or said no material conflict -> nothing to judge,
+            # but keep the two cases distinguishable (don't dress abstain up as "ok").
+            abstained = det.said_uncertain
             return AutoResult(
                 trace_id=trace.id, detector_status=ResultStatus.OK, conflict=label,
                 verdict=AutoVerdict.OK, needs_review=False,
-                rationale="no material source conflict detected", evidence=evidence,
+                detector_abstained=abstained,
+                detector_label="abstain" if abstained else (label.value if label else None),
+                rationale=(
+                    "detector abstained; conflict undetermined, judge not run"
+                    if abstained else "no material source conflict detected"
+                ),
+                evidence=evidence,
             )
 
         status, verdict, rationale, span = self.judge.judge(trace, label.value)
         if status is not ResultStatus.OK:
             return AutoResult(
                 trace_id=trace.id, detector_status=ResultStatus.OK, conflict=label,
-                verdict=AutoVerdict.UNCLEAR, needs_review=True,
+                detector_label=label.value, verdict=AutoVerdict.UNCLEAR, needs_review=True,
                 rationale="behavior judge failed", behavior_status=status, evidence=evidence,
             )
         return AutoResult(
             trace_id=trace.id, detector_status=ResultStatus.OK, conflict=label,
-            verdict=verdict, needs_review=verdict is not AutoVerdict.OK,
+            detector_label=label.value, verdict=verdict,
+            needs_review=verdict is not AutoVerdict.OK,
             rationale=rationale, risky_answer_span=span, behavior_status=status, evidence=evidence,
         )
 

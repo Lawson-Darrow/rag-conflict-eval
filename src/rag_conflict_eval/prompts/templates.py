@@ -31,7 +31,11 @@ PROMPT_VERSION = "v0"
 # occurrence of a block tag by inserting a zero-width space after the "<", so it
 # no longer matches the real delimiter while staying visually identical.
 _ZWSP = "​"
-_BLOCK_TAGS = ("<SOURCES>", "</SOURCES>", "<CANDIDATE_ANSWER>", "</CANDIDATE_ANSWER>")
+_BLOCK_TAGS = (
+    "<SOURCES>", "</SOURCES>",
+    "<CANDIDATE_ANSWER>", "</CANDIDATE_ANSWER>",
+    "<ANSWER>", "</ANSWER>",
+)
 _TAG_RE = re.compile("|".join(re.escape(t) for t in _BLOCK_TAGS), re.IGNORECASE)
 
 
