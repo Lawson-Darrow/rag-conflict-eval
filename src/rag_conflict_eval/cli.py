@@ -20,7 +20,12 @@ from collections import Counter
 
 from .aggregate import AdherenceReport, aggregate
 from .auto import AutoPipeline, AutoResult, AutoVerdict, load_traces
-from .coarse import CoarseConflict, CoarseConflictDetector, benchmark_coarse_detector
+from .coarse import (
+    CalibratedCoarseDetector,
+    CoarseConflict,
+    CoarseConflictDetector,
+    benchmark_coarse_detector,
+)
 from .detector import ABSTAIN, ERROR, ConflictTypeDetector, DetectorReport, benchmark_detector
 from .taxonomy import ConflictType
 from .loader import load_conflicts, record_to_instance, stratified_sample, stratified_split
@@ -145,7 +150,10 @@ def _select(instances, args):
 def _cmd_bench_coarse(args: argparse.Namespace) -> int:
     instances = _select(load_conflicts(args.data), args)
     thresholds = tuple(float(x) for x in args.thresholds.split(","))
-    detector = CoarseConflictDetector(model=args.model, judged_text_field=args.judged_text_field)
+    if args.calibrated:
+        detector = CalibratedCoarseDetector(model=args.model, judged_text_field=args.judged_text_field)
+    else:
+        detector = CoarseConflictDetector(model=args.model, judged_text_field=args.judged_text_field)
     bench = benchmark_coarse_detector(detector, instances, thresholds=thresholds)
     print(format_coarse_benchmark(bench))
     if args.out:
@@ -311,6 +319,10 @@ def build_parser() -> argparse.ArgumentParser:
     pcz.add_argument("--sample", type=int, default=0, help="stratified sample of N (preferred over --limit)")
     pcz.add_argument("--seed", type=int, default=0)
     pcz.add_argument("--thresholds", default="0.6,0.7,0.8", help="comma-separated confidence cutoffs")
+    pcz.add_argument(
+        "--calibrated", action="store_true",
+        help="use logprob-calibrated single-token detection (real confidence/abstention)",
+    )
     pcz.add_argument("--out", help="write raw per-instance predictions JSONL here")
     pcz.set_defaults(func=_cmd_bench_coarse)
 

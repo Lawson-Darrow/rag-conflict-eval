@@ -2,9 +2,11 @@ import pytest
 
 from rag_conflict_eval import ConflictType
 from rag_conflict_eval.coarse import (
+    CalibratedCoarseDetector,
     CoarseConflict,
     CoarseConflictDetector,
     CoarseDetectionResult,
+    _letter_distribution,
     benchmark_coarse_detector,
     parse_coarse,
     resolve,
@@ -75,6 +77,54 @@ def test_detect_parse_error_then_judge_error():
 
 
 # --- resolve (threshold gating) ---
+
+def test_letter_distribution_parses_objects_and_dicts():
+    import math
+
+    class _Tok:
+        def __init__(self, token, logprob):
+            self.token = token
+            self.logprob = logprob
+
+    d = _letter_distribution([_Tok("D", math.log(0.6)), _Tok("N", math.log(0.3)), _Tok(" x", math.log(0.1))])
+    assert round(d["D"], 3) == 0.6 and round(d["N"], 3) == 0.3 and "X" not in d
+    d2 = _letter_distribution([{"token": "U", "logprob": math.log(0.5)}])
+    assert round(d2["U"], 3) == 0.5
+
+
+def _calib(dist):
+    return CalibratedCoarseDetector(logprob_fn=lambda m: dict(dist))
+
+
+def test_calibrated_picks_max_and_normalizes():
+    r = _calib({"D": 0.6, "N": 0.2}).detect(_inst())
+    assert r.status is ResultStatus.OK
+    assert r.label is SD
+    assert round(r.confidence, 3) == round(0.6 / 0.8, 3)   # normalized over the letters
+    assert r.signals["margin"] > 0
+
+
+def test_calibrated_uncertain_abstains():
+    r = _calib({"U": 0.5, "D": 0.3}).detect(_inst())
+    assert r.said_uncertain is True and r.label is None
+
+
+def test_calibrated_error_paths():
+    assert _calib({}).detect(_inst()).status is ResultStatus.PARSE_ERROR
+
+    def boom(_):
+        raise RuntimeError("api down")
+
+    assert CalibratedCoarseDetector(logprob_fn=boom).detect(_inst()).status is ResultStatus.JUDGE_ERROR
+
+
+def test_calibrated_confidence_actually_gates_abstention():
+    # The whole point: real confidence varies, so the threshold sweep now works.
+    r = _calib({"D": 0.55, "N": 0.45}).detect(_inst())   # normalized conf 0.55
+    assert round(r.confidence, 2) == 0.55
+    assert resolve(r, 0.5) is SD          # above threshold -> predict
+    assert resolve(r, 0.7) is None        # below threshold -> abstain
+
 
 def test_resolve_threshold_logic():
     assert resolve(_res(SD, 0.8), 0.7) is SD

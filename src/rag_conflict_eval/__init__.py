@@ -5,6 +5,7 @@ from __future__ import annotations
 from .aggregate import AdherenceReport, TypeReport, aggregate
 from .auto import AutoPipeline, AutoResult, AutoVerdict, Trace, load_traces
 from .coarse import (
+    CalibratedCoarseDetector,
     CoarseConflict,
     CoarseConflictDetector,
     CoarseDetectionResult,
@@ -67,6 +68,7 @@ __all__ = [
     # coarse detection (auto / false-consensus wedge)
     "CoarseConflict",
     "CoarseConflictDetector",
+    "CalibratedCoarseDetector",
     "CoarseDetectionResult",
     "FINE_TO_COARSE",
     "benchmark_coarse_detector",

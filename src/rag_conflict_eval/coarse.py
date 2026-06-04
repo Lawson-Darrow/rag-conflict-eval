@@ -16,6 +16,7 @@ stays for oracle mode.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from enum import Enum
@@ -23,7 +24,9 @@ from typing import Callable, Optional
 
 from .prompts.templates import (
     COARSE_DETECTION_PROMPT_VERSION,
+    COARSE_LABEL_PROMPT_VERSION,
     build_coarse_detection_prompt,
+    build_coarse_label_prompt,
     build_coarse_repair_message,
 )
 from .taxonomy import ConflictType
@@ -197,6 +200,101 @@ def resolve(result: CoarseDetectionResult, threshold: float) -> Optional[CoarseC
     return result.label
 
 
+_LETTER_TO_COARSE = {
+    "N": CoarseConflict.NO_MATERIAL_ISSUE,
+    "D": CoarseConflict.SOURCE_DIVERGENCE,
+    "T": CoarseConflict.TEMPORAL_SUPERSESSION,
+}
+_VALID_LETTERS = set(_LETTER_TO_COARSE) | {"U"}
+
+
+def _letter_distribution(top_logprobs) -> dict:
+    """OpenAI/litellm first-token ``top_logprobs`` -> ``{LETTER: probability}``."""
+    dist: dict[str, float] = {}
+    for item in top_logprobs or []:
+        tok = item.get("token") if isinstance(item, dict) else getattr(item, "token", None)
+        if not tok:
+            continue
+        letter = tok.strip().upper()[:1]
+        if letter in _VALID_LETTERS:
+            lp = item.get("logprob") if isinstance(item, dict) else getattr(item, "logprob", None)
+            if lp is not None:
+                dist[letter] = max(dist.get(letter, 0.0), math.exp(lp))
+    return dist
+
+
+class CalibratedCoarseDetector:
+    """Coarse detector with REAL (logprob-based) confidence, so abstention works.
+
+    Asks for a single-letter label (N/D/T/U) and reads the first-token logprobs;
+    ``confidence`` is the probability of the chosen letter normalized over the four
+    letters. It does NOT abstain on a confidence threshold itself (only intrinsic
+    "U"); pass results through ``resolve()`` / ``benchmark_coarse_detector`` thresholds
+    to trade coverage for accuracy. Inject ``logprob_fn`` (messages -> {letter: prob})
+    to test without the API.
+    """
+
+    def __init__(
+        self,
+        model: str = "gpt-4o-mini",
+        *,
+        judged_text_field: JudgedTextField = "short_text",
+        temperature: float = 0.0,
+        top_logprobs: int = 10,
+        logprob_fn: Optional[Callable[[list[dict]], dict]] = None,
+    ) -> None:
+        self.model = model
+        self.judged_text_field = judged_text_field
+        self.temperature = temperature
+        self.top_logprobs = top_logprobs
+        self._logprob_fn = logprob_fn
+
+    def _distribution(self, messages: list[dict]) -> dict:
+        if self._logprob_fn is not None:
+            return self._logprob_fn(messages)
+        import litellm
+
+        resp = litellm.completion(
+            model=self.model, messages=messages, temperature=self.temperature,
+            max_tokens=1, logprobs=True, top_logprobs=self.top_logprobs,
+        )
+        content = resp.choices[0].logprobs.content
+        return _letter_distribution(content[0].top_logprobs if content else [])
+
+    def _result(self, instance, **kw) -> CoarseDetectionResult:
+        return CoarseDetectionResult(
+            instance_id=instance.id, detector_model=self.model,
+            prompt_version=COARSE_LABEL_PROMPT_VERSION, **kw,
+        )
+
+    def detect(self, instance: ConflictInstance) -> CoarseDetectionResult:
+        messages = build_coarse_label_prompt(instance, judged_text_field=self.judged_text_field)
+        try:
+            dist = self._distribution(messages)
+        except Exception as e:
+            return self._result(instance, status=ResultStatus.JUDGE_ERROR, error=repr(e))
+        if not dist:
+            return self._result(
+                instance, status=ResultStatus.PARSE_ERROR,
+                error="no valid letter (N/D/T/U) found in logprobs",
+            )
+        total = sum(dist.values()) or 1.0
+        norm = {k: v / total for k, v in dist.items()}
+        best = max(norm, key=norm.get)
+        conf = norm[best]
+        ordered = sorted(norm.values(), reverse=True)
+        signals = {"distribution": norm, "margin": conf - (ordered[1] if len(ordered) > 1 else 0.0)}
+        if best == "U":
+            return self._result(
+                instance, status=ResultStatus.OK, said_uncertain=True,
+                confidence=conf, signals=signals,
+            )
+        return self._result(
+            instance, status=ResultStatus.OK, label=_LETTER_TO_COARSE[best],
+            confidence=conf, signals=signals,
+        )
+
+
 # --- benchmark (one API run, swept over thresholds) ---
 
 def _prf(tp: int, fp: int, fn: int):
@@ -328,6 +426,7 @@ def benchmark_coarse_detector(
 __all__ = [
     "CoarseConflict",
     "CoarseConflictDetector",
+    "CalibratedCoarseDetector",
     "CoarseDetectionResult",
     "CoarseThresholdReport",
     "CoarseBenchmark",
