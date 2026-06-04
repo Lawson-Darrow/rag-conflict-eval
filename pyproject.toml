@@ -24,7 +24,8 @@ dependencies = [
 
 [project.optional-dependencies]
 deepeval = ["deepeval>=1.0"]
-ragas = ["ragas>=0.2"]
+# ragas 0.4.x currently breaks on langchain 1.x (vertexai import); 0.2.x verified working.
+ragas = ["ragas>=0.2,<0.3"]
 dev = ["pytest>=8.0", "ruff>=0.5", "mypy>=1.10"]
 
 [project.scripts]
