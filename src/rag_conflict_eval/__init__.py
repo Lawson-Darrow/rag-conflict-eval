@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from .aggregate import AdherenceReport, TypeReport, aggregate
+from .detector import (
+    ConflictTypeDetector,
+    DetectionResult,
+    DetectorReport,
+    benchmark_detector,
+)
 from .loader import LABEL_MAP, load_conflicts, stratified_split
 from .prompts.templates import PROMPT_VERSION, build_judge_prompt
 from .scorer import BehaviorAdherenceScorer, parse_verdict
@@ -44,5 +50,10 @@ __all__ = [
     "parse_verdict",
     "build_judge_prompt",
     "PROMPT_VERSION",
+    # detection
+    "ConflictTypeDetector",
+    "DetectionResult",
+    "DetectorReport",
+    "benchmark_detector",
     "__version__",
 ]

@@ -19,6 +19,7 @@ import sys
 from collections import Counter
 
 from .aggregate import AdherenceReport, aggregate
+from .detector import ConflictTypeDetector, DetectorReport, benchmark_detector
 from .loader import load_conflicts, record_to_instance, stratified_split
 from .scorer import BehaviorAdherenceScorer
 from .types import AdherenceResult
@@ -59,6 +60,39 @@ def format_report(report: AdherenceReport) -> str:
             f"err={tr.n_parse_error + tr.n_judge_error} n={tr.n_total})"
         )
     return "\n".join(lines)
+
+
+def format_detector_report(report: DetectorReport) -> str:
+    lines = []
+    mf1 = report.macro_f1
+    lines.append(f"detector macro-F1: {mf1:.3f}" if mf1 is not None else "detector macro-F1: n/a")
+    lines.append(
+        f"  coverage={report.coverage:.3f} accuracy_on_covered="
+        + (f"{report.accuracy_on_covered:.3f}" if report.accuracy_on_covered is not None else "n/a")
+        + f" abstained={report.abstention_rate:.3f} errors={report.error_rate:.3f} (n={report.n_total})"
+    )
+    if report.experimental_excluded:
+        excl = ", ".join(t.value for t in report.experimental_excluded)
+        lines.append(f"  excluded from macro-F1 (experimental): {excl}")
+    lines.append("  per-type (precision / recall / f1 / support):")
+    for t, m in sorted(report.per_class.items(), key=lambda kv: kv[0].value):
+        def _f(x):
+            return f"{x:.3f}" if x is not None else "n/a"
+        lines.append(
+            f"    {t.value:<22} {_f(m.precision):>6} / {_f(m.recall):>6} / "
+            f"{_f(m.f1):>6} / {m.support}"
+        )
+    return "\n".join(lines)
+
+
+def _cmd_bench_detector(args: argparse.Namespace) -> int:
+    instances = load_conflicts(args.data)
+    if args.limit:
+        instances = instances[: args.limit]
+    detector = ConflictTypeDetector(model=args.model, judged_text_field=args.judged_text_field)
+    report = benchmark_detector(detector, instances)
+    print(format_detector_report(report))
+    return 0
 
 
 def _cmd_stats(args: argparse.Namespace) -> int:
@@ -124,6 +158,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="fold experimental types (Misinformation) into the headline too",
     )
     pc.set_defaults(func=_cmd_score)
+
+    pb = sub.add_parser(
+        "bench-detector", help="benchmark the conflict-type detector vs gold labels"
+    )
+    pb.add_argument("data", help="path to conflicts.jsonl (gold-labeled)")
+    pb.add_argument("--model", default="gpt-4o-mini", help="litellm detector model")
+    pb.add_argument(
+        "--judged-text-field", default="short_text",
+        choices=["snippet", "short_text", "response_str"],
+    )
+    pb.add_argument("--limit", type=int, default=0, help="benchmark only the first N (cost control)")
+    pb.set_defaults(func=_cmd_bench_detector)
     return p
 
 
