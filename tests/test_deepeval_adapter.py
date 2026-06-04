@@ -7,7 +7,7 @@ from rag_conflict_eval.adapters.deepeval import (
     instance_from_test_case,
     map_result,
 )
-from rag_conflict_eval.types import AdherenceLabel, AdherenceResult, ResultStatus, SearchResult
+from rag_conflict_eval.types import AdherenceLabel, AdherenceResult, ResultStatus
 
 
 class _TC:

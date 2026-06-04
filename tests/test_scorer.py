@@ -1,4 +1,3 @@
-import pytest
 
 from rag_conflict_eval import (
     AdherenceLabel,
