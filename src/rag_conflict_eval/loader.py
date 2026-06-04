@@ -29,10 +29,11 @@ LABEL_MAP: dict[str, ConflictType] = {
 }
 
 
-def _make_id(source: str | None, question: str) -> str:
-    """Stable content hash id, independent of file ordering."""
-    key = f"{source or ''}\x00{question}".encode("utf-8")
-    return hashlib.sha1(key).hexdigest()[:12]
+def _make_id(rec: dict) -> str:
+    """Stable id hashing the full canonical record (collision-resistant; two
+    records differing in any field get different ids). Independent of file order."""
+    canon = json.dumps(rec, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha1(canon).hexdigest()[:16]
 
 
 def _parse_record(rec: dict, *, line_no: int) -> ConflictInstance:
@@ -61,7 +62,7 @@ def _parse_record(rec: dict, *, line_no: int) -> ConflictInstance:
         for s in (rec.get("search_results") or [])
     ]
     return ConflictInstance(
-        id=_make_id(rec.get("source"), rec["question"]),
+        id=_make_id(rec),
         question=rec["question"],
         search_results=results,
         conflict_type=ctype,
@@ -78,6 +79,7 @@ def load_conflicts(path: str | Path) -> list[ConflictInstance]:
     """
     path = Path(path)
     instances: list[ConflictInstance] = []
+    seen_ids: dict[str, int] = {}
     with path.open(encoding="utf-8") as f:
         for line_no, line in enumerate(f, start=1):
             line = line.strip()
@@ -87,7 +89,15 @@ def load_conflicts(path: str | Path) -> list[ConflictInstance]:
                 rec = json.loads(line)
             except json.JSONDecodeError as e:
                 raise ValueError(f"Malformed JSON at line {line_no}: {e}") from e
-            instances.append(_parse_record(rec, line_no=line_no))
+            inst = _parse_record(rec, line_no=line_no)
+            if inst.id in seen_ids:
+                raise ValueError(
+                    f"Duplicate instance id {inst.id} at line {line_no} "
+                    f"(first seen at line {seen_ids[inst.id]}): identical record. "
+                    f"Dataset should not contain duplicates."
+                )
+            seen_ids[inst.id] = line_no
+            instances.append(inst)
     return instances
 
 
@@ -99,8 +109,15 @@ def stratified_split(
 ) -> tuple[list[ConflictInstance], list[ConflictInstance]]:
     """Split per conflict type so each type keeps its proportion in both halves.
 
-    Deterministic: instances are sorted by id before a seeded shuffle, so the
-    result is independent of input ordering.
+    Deterministic and input-order independent: within each type, instances are
+    sorted by id and shuffled with a PER-TYPE RNG seeded from ``(seed, type)``,
+    so neither input ordering nor the set of types present affects any single
+    type's assignment.
+
+    Note: the per-type test count is ``round(n * test_size)`` (banker's
+    rounding). For tiny classes this can be 0 (e.g. n=5, test_size=0.1 -> 0).
+    Misinformation (n=5) in particular may get no held-out items at small
+    test_size; check the per-type counts if you depend on it.
     """
     if not 0.0 <= test_size <= 1.0:
         raise ValueError(f"test_size must be in [0, 1], got {test_size}")
@@ -109,12 +126,11 @@ def stratified_split(
     for inst in instances:
         by_type.setdefault(inst.conflict_type, []).append(inst)
 
-    rng = random.Random(seed)
     train: list[ConflictInstance] = []
     test: list[ConflictInstance] = []
-    for items in by_type.values():
-        items = sorted(items, key=lambda i: i.id)
-        rng.shuffle(items)
+    for ctype in sorted(by_type, key=lambda c: c.value):
+        items = sorted(by_type[ctype], key=lambda i: i.id)
+        random.Random(f"{seed}:{ctype.value}").shuffle(items)
         n_test = round(len(items) * test_size)
         test.extend(items[:n_test])
         train.extend(items[n_test:])

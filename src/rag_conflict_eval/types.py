@@ -110,6 +110,23 @@ class AdherenceResult:
     #: Error detail when ``status`` is not OK.
     error: Optional[str] = None
 
+    def __post_init__(self) -> None:
+        # Coerce strings to enums so results survive JSON round-trips and the
+        # ``is`` comparisons below stay valid.
+        if isinstance(self.status, str):
+            self.status = ResultStatus(self.status)
+        if isinstance(self.label, str):
+            self.label = AdherenceLabel(self.label)
+        if isinstance(self.conflict_type, str):
+            self.conflict_type = ConflictType(self.conflict_type)
+        # Enforce the verdict/status invariant: a verdict exists iff status is OK.
+        if self.status is ResultStatus.OK and self.label is None:
+            raise ValueError("status=OK requires a label (adhere/not_adhere/uncertain)")
+        if self.status is not ResultStatus.OK and self.label is not None:
+            raise ValueError(
+                f"status={self.status.value} must not carry a label (got {self.label})"
+            )
+
     @property
     def score(self) -> Optional[int]:
         if self.status is not ResultStatus.OK:
